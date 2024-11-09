@@ -10,12 +10,19 @@ hardmaru's changes:
 More difficult, since dt is 0.05 (not 0.01), and only 200 timesteps
 """
 
-import gym
-from gym import spaces
-from gym.utils import seeding
+import gymnasium
+from gymnasium import spaces
+from gymnasium.utils import seeding
 import logging
 import math
 import numpy as np
+
+import stable_baselines3
+from stable_baselines3 import PPO
+from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.vec_env.base_vec_env import VecEnv
+from stable_baselines3.common.vec_env.util import copy_obs_dict, dict_to_obs, obs_space_info
+
 
 logger = logging.getLogger(__name__)
 
