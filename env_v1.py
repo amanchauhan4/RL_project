@@ -17,17 +17,11 @@ import logging
 import math
 import numpy as np
 
-import stable_baselines3
-from stable_baselines3 import PPO
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-from stable_baselines3.common.vec_env.util import copy_obs_dict, dict_to_obs, obs_space_info
-
 
 logger = logging.getLogger(__name__)
 
 
-class DroneNet():
+class DroneNet(gymnasium.Env):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second': 50
