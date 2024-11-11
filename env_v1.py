@@ -34,8 +34,9 @@ class DroneNet(gymnasium.Env):
         self.l = 3
         self.I = 1/3.0
         self.r = 0.2
+        self.dt = 1e-3
         self.t = 0  # timestep
-        self.t_limit = 1000
+        self.t_limit = 2000
         self.Fmax = 20
         self.Mmax = 100
         self.z_max = 100
@@ -97,7 +98,7 @@ class DroneNet(gymnasium.Env):
 
         alpha = action[0]/self.md
         M_control = action[1]
-        M = np.zeros(3,3)
+        M = np.zeros((3,3))
 
         M[0,0]=1+self.mu
         M[0,1]=(self.l/2.0-self.r*theta)*math.cos(theta)
@@ -143,16 +144,16 @@ class DroneNet(gymnasium.Env):
 
         obs = np.array([z,theta,sigma,z_dot,theta_dot,sigma_dot])
 
-        return obs, reward, terminated, truncated
+        return obs, reward, terminated, truncated,{}
 
-    def reset(self):
+    def reset(self,seed=None,options=None):
         # self.state = self.np_random.normal(loc=np.array([0.0, 0.0, 30*(2*np.pi)/360, 0.0]), scale=np.array([0.0, 0.0, 0.0, 0.0]))
         self.state = np.random.normal(loc=np.array([0.0, 0.0,0.0,0.0, 0.0,0.0]), scale=np.array([0.2, 0.2, 0.2, 0.2,0.2,0.2]))
         self.steps_beyond_done = None
         self.t = 0  # timestep
         z,theta,sigma,z_dot,theta_dot,sigma_dot = self.state
         obs = np.array([z,theta,sigma,z_dot,theta_dot,sigma_dot])
-        return obs
+        return obs,{}
 
     def render(self, mode='human', close=False):
         pass
