@@ -18,8 +18,6 @@ import math
 import numpy as np
 
 
-logger = logging.getLogger(__name__)
-
 
 class DroneNet(gymnasium.Env):
     metadata = {
@@ -47,15 +45,19 @@ class DroneNet(gymnasium.Env):
         self.z_initial = self.r
         self.theta_initial = 0.0
         self.sigma_intial = 0.0
-        self.zdot_intial = 
+        self.z_dot_intial = 0.0
+        self.theta_dot_initial = 0.0
+        self.sigma_dot_intial = 0.0
 
         self.z_final = -2.0
         self.sigma_final = math.pi/180.0*30.0
         self.theta_final = math.atan(self.mu/(1+self.mu)/math.tan(self.sigma_final))
+        self.z_dot_final = 0.0
+        self.theta_dot_final = 0.0
+        self.sigma_dot_final = 0.0
 
-
-        self.x_initial = np.array([]) 
-        self.x_final = np.array([])
+        
+        self.x_final = np.array([self.z_final,self.theta_final,self.sigma_final,self.z_dot_final,self.theta_dot_final,self.sigma_dot_final])
         
         high = np.array([
             np.finfo(np.float32).max,
