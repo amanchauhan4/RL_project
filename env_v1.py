@@ -42,7 +42,20 @@ class DroneNet(gymnasium.Env):
         self.Mmax = 100
         self.z_max = 100
         self.theta_max = math.pi/2.0
-        self.sigma_max = math.pi 
+        self.sigma_max = math.pi
+        #define boundary conditions
+        self.z_initial = self.r
+        self.theta_initial = 0.0
+        self.sigma_intial = 0.0
+        self.zdot_intial = 
+
+        self.z_final = -2.0
+        self.sigma_final = math.pi/180.0*30.0
+        self.theta_final = math.atan(self.mu/(1+self.mu)/math.tan(self.sigma_final))
+
+
+        self.x_initial = np.array([]) 
+        self.x_final = np.array([])
         
         high = np.array([
             np.finfo(np.float32).max,
@@ -113,15 +126,18 @@ class DroneNet(gymnasium.Env):
 
         terminated = False
         truncated = False
+        reward = -1.0
         if z < -self.z_max or z> self.z_max or theta>self.theta_max or theta<0 or sigma<-self.sigma_max or sigma>self.sigma_max:
             terminated=True
+            reward+= -1000.0
 
         self.t += 1
 
         if self.t >= self.t_limit:
             truncated=True
-
-        reward = -1.0
+        if np.linalg.norm(np.array([z,theta,sigma,z_dot,theta_dot,sigma_dot])-self.x_final)<1e-3:
+            reward+=5000
+            terminated=True
 
         obs = np.array([z,theta,sigma,z_dot,theta_dot,sigma_dot])
 
@@ -129,7 +145,7 @@ class DroneNet(gymnasium.Env):
 
     def _reset(self):
         # self.state = self.np_random.normal(loc=np.array([0.0, 0.0, 30*(2*np.pi)/360, 0.0]), scale=np.array([0.0, 0.0, 0.0, 0.0]))
-        self.state = np.random.normal(loc=np.array([0.0, 0.0, np.pi, 0.0]), scale=np.array([0.2, 0.2, 0.2, 0.2]))
+        self.state = np.random.normal(loc=np.array([0.0, 0.0,0.0,0.0, 0.0]), scale=np.array([0.2, 0.2, 0.2, 0.2]))
         self.steps_beyond_done = None
         self.t = 0  # timestep
         x, x_dot, theta, theta_dot = self.state
