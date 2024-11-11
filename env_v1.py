@@ -79,13 +79,13 @@ class DroneNet(gymnasium.Env):
 
         self.observation_space = spaces.Box(-high, high)
 
-        self.seed()
+#        self.seed()
         self.viewer = None
         self.state = None
 
-    def seed(self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
+#    def seed(self, seed=None):
+#        self.np_random, seed = seeding.np_random(seed)
+#        return [seed]
 
     def step(self, action):
         # Valid action
@@ -145,14 +145,14 @@ class DroneNet(gymnasium.Env):
 
         return obs, reward, terminated, truncated
 
-    def _reset(self):
+    def reset(self):
         # self.state = self.np_random.normal(loc=np.array([0.0, 0.0, 30*(2*np.pi)/360, 0.0]), scale=np.array([0.0, 0.0, 0.0, 0.0]))
-        self.state = np.random.normal(loc=np.array([0.0, 0.0,0.0,0.0, 0.0]), scale=np.array([0.2, 0.2, 0.2, 0.2]))
+        self.state = np.random.normal(loc=np.array([0.0, 0.0,0.0,0.0, 0.0,0.0]), scale=np.array([0.2, 0.2, 0.2, 0.2,0.2,0.2]))
         self.steps_beyond_done = None
         self.t = 0  # timestep
-        x, x_dot, theta, theta_dot = self.state
-        obs = np.array([x, x_dot, np.cos(theta), np.sin(theta), theta_dot])
+        z,theta,sigma,z_dot,theta_dot,sigma_dot = self.state
+        obs = np.array([z,theta,sigma,z_dot,theta_dot,sigma_dot])
         return obs
 
-    def _render(self, mode='human', close=False):
+    def render(self, mode='human', close=False):
         pass
