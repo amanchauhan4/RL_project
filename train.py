@@ -1,31 +1,34 @@
-#train the agent
-import gymnasium
-from gymnasium import spaces
-from gymnasium.utils import seeding
-import logging
-import math
-import numpy as np
+# train.py
 
-
-logger = logging.getLogger(__name__)
-
-
-from env_v1 import DroneNet
-import stable_baselines3
+from DroneNet import DroneNet
 from stable_baselines3 import PPO
-from stable_baselines3 import A2C
-from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.callbacks import CheckpointCallback
 
-from stable_baselines3 import DQN
-from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-from stable_baselines3.common.vec_env.util import copy_obs_dict, dict_to_obs, obs_space_info
+# Create the environment
+env = DroneNet(n_drones=5)
 
-# Instantiate the en
-env = DroneNet()
-env.reset()
+# Create a callback to save the model periodically
+checkpoint_callback = CheckpointCallback(save_freq=50000, save_path='./logs/',
+                                         name_prefix='ppo_drone_net')
+
 # Define and Train the agent
-# Parallel environments
-#vec_env = make_vec_env(env, n_envs=4)
-model = PPO("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=25000)
+model = PPO(
+    "MlpPolicy",
+    env,
+    verbose=1,
+    learning_rate=1e-4,
+    n_steps=2048,
+    batch_size=64,
+    gae_lambda=0.95,
+    gamma=0.99,
+    ent_coef=0.01,
+    clip_range=0.2,
+    n_epochs=10,
+    tensorboard_log="./ppo_drone_net_tensorboard/"
+)
+
+# Train the agent
+model.learn(total_timesteps=3000000, callback=checkpoint_callback)
+
+# Save the trained model
+model.save("ppo_drone_net_enhanced")
