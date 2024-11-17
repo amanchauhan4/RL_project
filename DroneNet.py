@@ -19,17 +19,25 @@ class DroneNet(gym.Env):
         self.m = 1.0   # Mass of the falling object (kg)
         self.n = 5.0   # Number of drones
         self.mu = self.m / self.n / self.md
-        self.l = 3     # Length parameter of the net (m)
+        self.l0 = 3.0  # Rest length of the net (m)
         self.I = 1 / 3.0  # Moment of inertia
-        self.r = 0.2       # Radius parameter
-        self.dt = 1e-3     # Time step (s)
-        self.t = 0         # Current timestep
+        self.r = 0.2  # Radius parameter
+        self.dt = 1e-3  # Time step (s)
+        self.t = 0  # Current timestep
         self.t_limit = 40000  # Maximum timesteps per episode
-        self.Fmax = 20        # Maximum thrust force
-        self.Mmax = 100       # Maximum moment
-        self.z_max = 100      # Maximum altitude
+        self.Fmax = 20  # Maximum thrust force
+        self.Mmax = 100  # Maximum moment
+        self.z_max = 100  # Maximum altitude
         self.theta_max = math.pi / 2.0  # Maximum angle theta
-        self.sigma_max = math.pi        # Maximum bank angle sigma
+        self.sigma_max = math.pi  # Maximum bank angle sigma
+
+        # Damping coefficients
+        self.damping_z = 0.1
+        self.damping_theta = 0.1
+        self.damping_sigma = 0.1
+
+        # Net elasticity coefficient
+        self.k_net = 50.0  # Net stiffness coefficient
 
         # Desired final state
         self.z_final = -2.0
@@ -82,19 +90,30 @@ class DroneNet(gym.Env):
 
         # Dynamics calculations
         M_matrix = np.array([
-            [1 + self.mu, (self.l / 2.0 - self.r * theta) * math.cos(theta), 0],
-            [(self.l / 2.0 - self.r * theta) * math.cos(theta), (self.l / 2.0 - self.r * theta) ** 2, 0],
+            [1 + self.mu, (self.l0 / 2.0 - self.r * theta) * math.cos(theta), 0],
+            [(self.l0 / 2.0 - self.r * theta) * math.cos(theta), (self.l0 / 2.0 - self.r * theta) ** 2, 0],
             [0, 0, self.I]
         ])
 
+        # Internal damping forces
+        damping_force_z = -self.damping_z * z_dot
+        damping_force_theta = -self.damping_theta * theta_dot
+        damping_force_sigma = -self.damping_sigma * sigma_dot
+
+        # Net elasticity force (Hooke's Law)
+        net_extension = (self.l0 / 2.0 - self.r * theta) - (self.l0 / 2.0)
+        elasticity_force = -self.k_net * net_extension
+
         v = np.array([
-            F * math.cos(sigma) - self.g * (1 + self.mu) + (theta_dot ** 2) * (math.sin(theta) * (self.l / 2.0 - self.r * theta) + self.r * math.cos(theta)),
-            F * (self.l / 2.0 - self.r * theta) * math.cos(theta + sigma) - self.r * (self.l / 2.0 - self.r * theta) * theta_dot ** 2
-            - z_dot * theta_dot * (math.sin(theta) * (self.l / 2.0 - self.r * theta) + self.r * math.cos(theta))
-            - self.g * (self.l / 2.0 - self.r * theta) * math.cos(theta)
-            - 2 * (self.l / 2.0 - self.r * theta) * (-self.r * theta_dot) * theta_dot
-            - z_dot * math.cos(theta) * (-self.r * theta_dot) + z_dot * math.sin(theta) * theta_dot * (self.l / 2.0 - self.r * theta),
-            M_control
+            F * math.cos(sigma) - self.g * (1 + self.mu) + damping_force_z + elasticity_force +
+            (theta_dot ** 2) * (math.sin(theta) * (self.l0 / 2.0 - self.r * theta) + self.r * math.cos(theta)),
+            F * (self.l0 / 2.0 - self.r * theta) * math.cos(theta + sigma) + damping_force_theta +
+            -self.r * (self.l0 / 2.0 - self.r * theta) * theta_dot ** 2
+            - z_dot * theta_dot * (math.sin(theta) * (self.l0 / 2.0 - self.r * theta) + self.r * math.cos(theta))
+            - self.g * (self.l0 / 2.0 - self.r * theta) * math.cos(theta)
+            - 2 * (self.l0 / 2.0 - self.r * theta) * (-self.r * theta_dot) * theta_dot
+            - z_dot * math.cos(theta) * (-self.r * theta_dot) + z_dot * math.sin(theta) * theta_dot * (self.l0 / 2.0 - self.r * theta),
+            M_control + damping_force_sigma
         ])
 
         try:
@@ -208,17 +227,17 @@ class DroneNet(gym.Env):
             self.viewer = True
 
         # Compute net endpoints based on theta
-        x1 = -self.l / 2 * math.cos(theta)
-        y1 = z + self.l / 2 * math.sin(theta)
-        x2 = self.l / 2 * math.cos(theta)
-        y2 = z + self.l / 2 * math.sin(theta)
+        x1 = -self.l0 / 2 * math.cos(theta)
+        y1 = z + self.l0 / 2 * math.sin(theta)
+        x2 = self.l0 / 2 * math.cos(theta)
+        y2 = z + self.l0 / 2 * math.sin(theta)
 
         self.line.set_data([x1, x2], [y1, y2])
         self.object_point.set_data([0], [z])
         self.time_text.set_text(f'Time: {self.t * self.dt:.2f}s')
 
         plt.draw()
-        plt.pause(0.05)
+        plt.pause(0.001)
 
     def close(self):
         if self.viewer:
