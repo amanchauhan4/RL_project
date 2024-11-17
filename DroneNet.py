@@ -24,7 +24,7 @@ class DroneNet(gym.Env):
         self.r = 0.2       # Radius parameter
         self.dt = 1e-3     # Time step (s)
         self.t = 0         # Current timestep
-        self.t_limit = 10000  # Maximum timesteps per episode
+        self.t_limit = 40000  # Maximum timesteps per episode
         self.Fmax = 20        # Maximum thrust force
         self.Mmax = 100       # Maximum moment
         self.z_max = 100      # Maximum altitude
