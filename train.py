@@ -4,76 +4,88 @@ from DroneNet import DroneNet
 import numpy as np
 import optuna
 from stable_baselines3 import PPO, SAC, TD3, DDPG
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.logger import configure
 import os
 import torch
+
+def make_env():
+    return DroneNet()
 
 def optimize_agent(trial):
     # Hyperparameters to tune
     algo = trial.suggest_categorical('algo', ['PPO', 'SAC', 'TD3', 'DDPG'])
     learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
     gamma = trial.suggest_float('gamma', 0.95, 0.9999)
-    n_steps = trial.suggest_categorical('n_steps', [1024, 2048, 4096])
-    batch_size = trial.suggest_categorical('batch_size', [64, 128, 256])
-    ent_coef = trial.suggest_float('ent_coef', 1e-8, 1e-2, log=True)
+    num_envs = 8  # Increase number of environments to better utilize GPU and CPU
 
     # Initialize the environment
-    env = DummyVecEnv([lambda: DroneNet()])
+    env = SubprocVecEnv([make_env for _ in range(num_envs)])
 
-    # Choose algorithm based on hyperparameter
+    # Set algorithm-specific hyperparameters
+    model_params = {
+        'policy': 'MlpPolicy',
+        'env': env,
+        'learning_rate': learning_rate,
+        'gamma': gamma,
+        'verbose': 0,
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+    }
+
     if algo == 'PPO':
-        model = PPO(
-            'MlpPolicy',
-            env,
-            learning_rate=learning_rate,
-            gamma=gamma,
-            n_steps=n_steps,
-            batch_size=batch_size,
-            ent_coef=ent_coef,
-            verbose=0,
-            device='cuda' if torch.cuda.is_available() else 'cpu'  # Explicitly set device
-        )
+        n_steps = trial.suggest_categorical('ppo_n_steps', [2048, 4096, 8192])
+        batch_size = trial.suggest_categorical('ppo_batch_size', [1024, 2048, 4096])
+        ent_coef = trial.suggest_float('ppo_ent_coef', 1e-8, 1e-2, log=True)
+        # Ensure n_steps is multiple of num_envs
+        if n_steps % num_envs != 0:
+            n_steps = ((n_steps // num_envs) + 1) * num_envs
+        # Ensure (n_steps * num_envs) is divisible by batch_size
+        total_batch_size = n_steps * num_envs
+        if total_batch_size % batch_size != 0:
+            batch_size = total_batch_size // (total_batch_size // batch_size)
+        model_params.update({
+            'n_steps': n_steps,
+            'batch_size': batch_size,
+            'ent_coef': ent_coef
+        })
+        model = PPO(**model_params)
     elif algo == 'SAC':
-        model = SAC(
-            'MlpPolicy',
-            env,
-            learning_rate=learning_rate,
-            gamma=gamma,
-            batch_size=batch_size,
-            ent_coef=ent_coef,
-            verbose=0,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        batch_size = trial.suggest_categorical('sac_batch_size', [512, 1024, 2048])
+        ent_coef = trial.suggest_float('sac_ent_coef', 1e-8, 1e-2, log=True)
+        model_params.update({
+            'batch_size': batch_size,
+            'ent_coef': ent_coef
+        })
+        model = SAC(**model_params)
     elif algo == 'TD3':
-        model = TD3(
-            'MlpPolicy',
-            env,
-            learning_rate=learning_rate,
-            gamma=gamma,
-            batch_size=batch_size,
-            verbose=0,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        batch_size = trial.suggest_categorical('td3_batch_size', [512, 1024, 2048])
+        model_params['batch_size'] = batch_size
+        model = TD3(**model_params)
     elif algo == 'DDPG':
-        model = DDPG(
-            'MlpPolicy',
-            env,
-            learning_rate=learning_rate,
-            gamma=gamma,
-            batch_size=batch_size,
-            verbose=0,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        batch_size = trial.suggest_categorical('ddpg_batch_size', [512, 1024, 2048])
+        model_params['batch_size'] = batch_size
+        model = DDPG(**model_params)
+
+    # Configure logger for Tensorboard
+    log_dir = f"./logs/trial_{trial.number}"
+    os.makedirs(log_dir, exist_ok=True)
+    new_logger = configure(log_dir, ["stdout", "tensorboard"])
+    model.set_logger(new_logger)
 
     # Train the model
     try:
-        model.learn(total_timesteps=50000)
+        model.learn(total_timesteps=50000)  # Increased total_timesteps for better training
     except Exception as e:
         print(f"Training failed for trial with parameters: {trial.params}")
         raise e
 
     # Evaluate the model
     mean_reward = evaluate_model(model, num_episodes=5)
+
+    # Clean up
+    env.close()
+    del model
+    del env
 
     return mean_reward
 
@@ -90,7 +102,7 @@ def evaluate_model(model, num_episodes=5):
             obs, reward, terminated, truncated, info = eval_env.step(action)
             total_reward += reward
             done = terminated or truncated
-    all_rewards.append(total_reward)
+        all_rewards.append(total_reward)
     eval_env.close()
     return np.mean(all_rewards)
 
@@ -99,9 +111,10 @@ if __name__ == '__main__':
     os.makedirs('./models', exist_ok=True)
     os.makedirs('./logs', exist_ok=True)
 
-    # Create Optuna study
-    study = optuna.create_study(direction='maximize')
-    study.optimize(optimize_agent, n_trials=20)
+    # Create Optuna study with RDB storage for parallel execution
+    storage_name = "sqlite:///optuna_study.db"
+    study = optuna.create_study(direction='maximize', storage=storage_name, load_if_exists=True)
+    study.optimize(optimize_agent, n_trials=20, n_jobs=4)  # Increased n_jobs to better utilize CPU
 
     print("Best hyperparameters:", study.best_params)
 
@@ -109,44 +122,68 @@ if __name__ == '__main__':
     best_params = study.best_params
     algo = best_params.pop('algo')  # Remove 'algo' from best_params
 
-    env = DummyVecEnv([lambda: DroneNet()])
+    num_envs = 16  # Further increase num_envs for final training
 
-    # Choose algorithm based on the best hyperparameter
+    env = SubprocVecEnv([make_env for _ in range(num_envs)])
+
+    # Set up model_params
+    model_params = {
+        'policy': 'MlpPolicy',
+        'env': env,
+        'verbose': 1,
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+    }
+
     if algo == 'PPO':
-        model = PPO(
-            'MlpPolicy',
-            env,
-            **best_params,
-            verbose=1,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        n_steps = best_params.pop('ppo_n_steps')
+        batch_size = best_params.pop('ppo_batch_size')
+        ent_coef = best_params.pop('ppo_ent_coef')
+        # Ensure n_steps is multiple of num_envs
+        if n_steps % num_envs != 0:
+            n_steps = ((n_steps // num_envs) + 1) * num_envs
+        # Ensure (n_steps * num_envs) is divisible by batch_size
+        total_batch_size = n_steps * num_envs
+        if total_batch_size % batch_size != 0:
+            batch_size = total_batch_size // (total_batch_size // batch_size)
+        model_params.update({
+            'n_steps': n_steps,
+            'batch_size': batch_size,
+            'ent_coef': ent_coef
+        })
     elif algo == 'SAC':
-        model = SAC(
-            'MlpPolicy',
-            env,
-            **best_params,
-            verbose=1,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        batch_size = best_params.pop('sac_batch_size')
+        ent_coef = best_params.pop('sac_ent_coef')
+        model_params.update({
+            'batch_size': batch_size,
+            'ent_coef': ent_coef
+        })
     elif algo == 'TD3':
-        model = TD3(
-            'MlpPolicy',
-            env,
-            **best_params,
-            verbose=1,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        batch_size = best_params.pop('td3_batch_size')
+        model_params['batch_size'] = batch_size
     elif algo == 'DDPG':
-        model = DDPG(
-            'MlpPolicy',
-            env,
-            **best_params,
-            verbose=1,
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        batch_size = best_params.pop('ddpg_batch_size')
+        model_params['batch_size'] = batch_size
+
+    model_params.update(best_params)
+
+    # Initialize the model
+    if algo == 'PPO':
+        model = PPO(**model_params)
+    elif algo == 'SAC':
+        model = SAC(**model_params)
+    elif algo == 'TD3':
+        model = TD3(**model_params)
+    elif algo == 'DDPG':
+        model = DDPG(**model_params)
+
+    # Configure logger for Tensorboard
+    log_dir = f"./logs/final_training_{algo}"
+    os.makedirs(log_dir, exist_ok=True)
+    new_logger = configure(log_dir, ["stdout", "tensorboard"])
+    model.set_logger(new_logger)
 
     # Train the agent
-    model.learn(total_timesteps=500000)
+    model.learn(total_timesteps=1000000)  # Increased total_timesteps for final training
 
     # Save the trained model
     model_path = f"./models/{algo}_drone_net"
