@@ -1,19 +1,23 @@
 # evaluate.py
 
+import time
 from DroneNet import DroneNet
 from stable_baselines3 import PPO, SAC, TD3, DDPG
-from stable_baselines3.common.vec_env import DummyVecEnv
 import matplotlib.pyplot as plt
 import os
 
 def evaluate_model(model, env):
     obs, _ = env.reset()
     done = False
+    start_time = time.time()
     while not done:
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
-        env.envs[0].render()
+        env.render()
+        time.sleep(0.05)
+        if time.time() - start_time > 20:
+            break
     env.close()
 
 if __name__ == '__main__':
