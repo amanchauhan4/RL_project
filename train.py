@@ -36,7 +36,7 @@ def optimize_agent(trial):
     if algo == 'PPO':
         n_steps = trial.suggest_categorical('ppo_n_steps', [2048, 4096, 8192])
         batch_size = trial.suggest_categorical('ppo_batch_size', [64, 128, 256])
-        ent_coef = trial.suggest_float('ppo_ent_coef', 0.0, 0.01, log=True)
+        ent_coef = trial.suggest_float('ppo_ent_coef', 1e-5, 0.01, log=True)
         model_params.update({
             'n_steps': n_steps,
             'batch_size': batch_size,
@@ -45,7 +45,7 @@ def optimize_agent(trial):
         model = PPO(**model_params)
     elif algo == 'SAC':
         batch_size = trial.suggest_categorical('sac_batch_size', [64, 128, 256])
-        ent_coef = trial.suggest_float('sac_ent_coef', 0.0, 0.01, log=True)
+        ent_coef = trial.suggest_float('sac_ent_coef', 1e-5, 0.01, log=True)
         model_params.update({
             'batch_size': batch_size,
             'ent_coef': ent_coef
