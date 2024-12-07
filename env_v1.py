@@ -83,9 +83,9 @@ class DroneNet(gymnasium.Env):
         M_mat[0,1] = (self.l/2.0 - self.r*theta)*math.cos(theta)
         M_mat[1,0] = M_mat[0,1]
         M_mat[1,1] = (self.l/2.0 - self.r*theta)**2
-        M_mat[2,2] = 0.5
-        M_mat[0,2] = (math.sin(theta))/2.0
-        M_mat[2,0] = math.sin(theta)
+        M_mat[2,2] = self.I
+        M_mat[0,2] = 0.0
+        M_mat[2,0] =0.0
 
         # Compute accelerations:
         # ddq = M^-1 * f, where f is the generalized forces vector
@@ -125,8 +125,9 @@ class DroneNet(gymnasium.Env):
         # let's define a simpler system by ignoring some coupling terms.
         # This might not reflect the exact physics but will improve stability for RL:
         # In reality, you'd keep the full derivation, but let's reduce complexity here:
-        f1 = alpha * L_mid * math.cos(theta+sigma) - self.g * L_mid * math.cos(theta)
-
+        f1 = alpha*(self.l/2.0-self.r*theta)*math.cos(theta+sigma)-self.r*(self.l/2.0-self.r*theta)*theta_dot**2-z_dot*theta_dot*(math.sin(theta)*(self.l/2.0-self.r*theta)+self.r*math.cos(theta))\
+                -self.g*(self.l/2.0-self.r*theta)*math.cos(theta)-2*(self.l/2.0-self.r*theta)*(-self.r*theta_dot)*theta_dot-z_dot*math.cos(theta)*(-self.r*theta_dot)+z_dot*math.sin(theta)*theta_dot*(self.l/2.0-self.r*theta)
+        
         # Solve ddq
         try:
             ddq = np.linalg.solve(M_mat, np.array([f0, f1, f2]))
