@@ -1,27 +1,22 @@
-import gymnasium as gym
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import math
 import matplotlib.pyplot as plt
-from env_v1 import DroneNet  # Import the modified environment above
+from env_v1 import DroneNet
 
-# Instantiate the environment
+# Instantiate environment
 env = DroneNet()
 
-# Create a vectorized environment
 venv = DummyVecEnv([lambda: env])
-
-# Normalize the observations and rewards
 venv = VecNormalize(venv, norm_obs=True, norm_reward=True, clip_obs=10.)
 
-# Define and train the PPO agent with adjusted hyperparameters
 model = PPO(
     "MlpPolicy",
     venv,
     verbose=1,
-    learning_rate=1e-4,  # Lower learning rate can help stabilize training
+    learning_rate=1e-4,
     n_steps=2048,
     batch_size=64,
     n_epochs=10,
@@ -45,14 +40,13 @@ eval_callback = EvalCallback(
 
 checkpoint_callback = CheckpointCallback(save_freq=5000, save_path='./logs/checkpoints/')
 
-# Train the agent for more timesteps to allow convergence
 total_timesteps = 200000
 model.learn(total_timesteps=total_timesteps, callback=[eval_callback, checkpoint_callback])
 
-# Save the trained model
-model.save("ppo_dronenet_model")
+# Save model and VecNormalize stats
+model.save("./models/PPO_drone_net")  # match the evaluation default name
+venv.save("./models/vecnormalize.pkl")
 
-# Evaluation and plotting (same as before)
 def collect_actions_and_constraints(env, model, episodes=1):
     force = []
     moment = []
@@ -65,12 +59,15 @@ def collect_actions_and_constraints(env, model, episodes=1):
     total_rewards = []
     state_errors = []
 
+    # For evaluation, we need the non-vec environment or to reset venv properly
+    # We'll just reuse env directly (unwrapped)
     for ep in range(episodes):
-        obs, _ = env.reset()
+        obs, info = env.reset()
         done = False
         step = 0
         episode_reward = 0
         while not done:
+            # Normalize observation using venv's internal functions
             obs_norm = venv.normalize_obs(obs)
             action, _states = model.predict(obs_norm, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
@@ -82,7 +79,6 @@ def collect_actions_and_constraints(env, model, episodes=1):
             z.append(obs[0])
             theta.append(obs[1])
             sigma.append(obs[2])
-            # For simplicity, state_error is just the dist, can be extracted similarly as in step()
             error = np.array([obs[0]-env.z_final, obs[1]-env.theta_final, obs[2]-env.sigma_final,
                               obs[3]-env.z_dot_final, obs[4]-env.theta_dot_final, obs[5]-env.sigma_dot_final])
             dist = np.linalg.norm(error)
@@ -98,7 +94,6 @@ def collect_actions_and_constraints(env, model, episodes=1):
 
 force, moment, all_rewards, z, theta, sigma, constraints_violated, time_steps, total_rewards, state_errors = collect_actions_and_constraints(env, model, episodes=1)
 
-# Plotting as before
 plt.figure()
 plt.plot(total_rewards)
 plt.xlabel('Episode')
