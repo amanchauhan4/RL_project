@@ -1,26 +1,4 @@
-# Note: This code assumes that:
-# 1) You have the `env_v1.py` environment file unchanged in the same directory.
-# 2) You have stable_baselines3 and its dependencies installed.
-# 3) You have matplotlib and numpy installed.
-# 4) The code below is meant as a standalone training and comparison script (e.g. "train_comparison.py").
-#
-# The code:
-# - Imports the DroneNet environment from env_v1.py
-# - Trains multiple algorithms (PPO, A2C, TD3, SAC) under different hyperparameter settings
-# - Runs evaluation episodes to collect actions, rewards, states, etc.
-# - Creates comparison plots:
-#    - Plots of total reward per episode for different algorithms and hyperparameters on the same figure.
-#    - Plots of state error over time for different algorithms/hyperparameters.
-#    - Plots of force/moment/reward over time.
-#    - Plots of states (z, theta, sigma) over time.
-#
-# In this example, we vary learning_rate and gamma. You can add more variations as you see fit.
-#
-# IMPORTANT:
-# - This code will run multiple training sessions for each combination of algorithm and hyperparameters.
-#   This can be time-consuming. Adjust the number of timesteps, episodes, etc., as needed.
-# - The plotting logic combines results into single figures with multiple lines. Different algorithms will
-#   have different colors, and different hyperparameters will be represented by different line styles or markers.
+# train_comparison.py
 
 import os
 import math
@@ -45,12 +23,16 @@ algorithms = {
 }
 
 learning_rates = [1e-4, 5e-4]
-gammas = [0.99, 0.995]
+gammas = [0.99, 0.995, 0.95]  # Added gamma=0.95 as per your request
 
 # Training settings
-total_timesteps = 100000  # adjust as needed
+total_timesteps = 20000  # adjust as needed
 eval_freq = 5000
 episodes_to_evaluate = 1  # number of episodes to run for evaluation after training
+
+# Ensure directories exist
+os.makedirs("./models", exist_ok=True)
+os.makedirs("./logs", exist_ok=True)
 
 #--------------------------
 # Utility Functions
@@ -91,26 +73,28 @@ def train_and_evaluate(algorithm_cls, algo_name, lr, gamma):
         model = algorithm_cls(**common_kwargs)
 
     # Set up callbacks
+    model_log_dir = f'./logs/{algo_name}_lr{lr}_g{gamma}'
+    os.makedirs(model_log_dir, exist_ok=True)
     eval_callback = EvalCallback(
         venv,
-        best_model_save_path=f'./logs/{algo_name}_lr{lr}_g{gamma}/best_model',
-        log_path=f'./logs/{algo_name}_lr{lr}_g{gamma}',
+        best_model_save_path=os.path.join(model_log_dir, 'best_model'),
+        log_path=model_log_dir,
         eval_freq=eval_freq,
         deterministic=True,
         render=False
     )
-    checkpoint_callback = CheckpointCallback(save_freq=eval_freq, save_path=f'./logs/{algo_name}_lr{lr}_g{gamma}/checkpoints/')
+    checkpoint_callback = CheckpointCallback(save_freq=eval_freq, save_path=os.path.join(model_log_dir, 'checkpoints/'))
 
     # Train the model
     model.learn(total_timesteps=total_timesteps, callback=[eval_callback, checkpoint_callback])
 
     # Save model and normalization stats
-    model.save(f"./models/{algo_name}_lr{lr}_g{gamma}")
-    venv.save(f"./models/{algo_name}_lr{lr}_g{gamma}_vecnormalize.pkl")
+    model_save_path = f"./models/{algo_name}_lr{lr}_g{gamma}"
+    model.save(model_save_path)
+    venv.save(f"{model_save_path}_vecnormalize.pkl")
 
     # Evaluate model
     return collect_actions_and_constraints(make_env(), model, venv, episodes=episodes_to_evaluate)
-
 
 def collect_actions_and_constraints(env, model, venv, episodes=1):
     """
@@ -133,7 +117,6 @@ def collect_actions_and_constraints(env, model, venv, episodes=1):
         episode_reward = 0
         while not done:
             # Normalize observation using venv's internal function
-            # (We need to call the internal obs normalization if we want the same behavior as during training)
             obs_norm = venv.normalize_obs(obs)
             action, _states = model.predict(obs_norm, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
@@ -146,12 +129,14 @@ def collect_actions_and_constraints(env, model, venv, episodes=1):
             theta.append(obs[1])
             sigma.append(obs[2])
 
-            error = np.array([obs[0]-env.z_final,
-                              obs[1]-env.theta_final,
-                              obs[2]-env.sigma_final,
-                              obs[3]-env.z_dot_final,
-                              obs[4]-env.theta_dot_final,
-                              obs[5]-env.sigma_dot_final])
+            error = np.array([
+                obs[0] - env.z_final,
+                obs[1] - env.theta_final,
+                obs[2] - env.sigma_final,
+                obs[3] - env.z_dot_final,
+                obs[4] - env.theta_dot_final,
+                obs[5] - env.sigma_dot_final
+            ])
             dist = np.linalg.norm(error)
             state_errors.append(dist)
             time_steps.append(step)
@@ -161,7 +146,6 @@ def collect_actions_and_constraints(env, model, venv, episodes=1):
         total_rewards.append(episode_reward)
 
     return force, moment, all_rewards, z, theta, sigma, state_errors, total_rewards
-
 
 #--------------------------
 # Run Experiments
@@ -201,18 +185,11 @@ for algo_name, algo_cls in algorithms.items():
                 "total_rewards": total_rewards,
             }
 
-
 #--------------------------
 # Plotting
 #--------------------------
 
-# We'll create combined plots:
-# 1) Total Reward per Episode (different algorithms and hyperparams)
-# 2) State Error Over Time
-# 3) Force/Moment/Reward Over Time
-# 4) z, theta, sigma Over Time
-
-# To differentiate algorithms, assign each algorithm a color
+# Define colors for algorithms
 algo_colors = {
     "PPO": "blue",
     "A2C": "green",
@@ -220,133 +197,193 @@ algo_colors = {
     "SAC": "purple"
 }
 
-# For different hyperparams (lr, gamma), vary line styles or markers
+# Define line styles and markers for hyperparameter combinations
 line_styles = ["-", "--", "-.", ":"]
 markers = ["o", "s", "d", "^"]
-# We'll cycle through these for each (lr, gamma) combination
 param_combos = [(lr, gm) for lr in learning_rates for gm in gammas]
-
-# Create mapping from (lr,gamma) to style/marker
 style_map = {}
 for i, combo in enumerate(param_combos):
     style_map[combo] = (line_styles[i % len(line_styles)], markers[i % len(markers)])
 
+#------------------------------------------------
+# 1) Comparison Plots for lr=1e-4 and gamma=0.99
+#------------------------------------------------
 
-# Plot total reward per episode
+fixed_lr = 1e-4
+fixed_gamma = 0.99
+
+# Extract data for the chosen hyperparams and all four algorithms
+z_dict = {}
+theta_dict = {}
+sigma_dict = {}
+force_dict = {}
+moment_dict = {}
+
+for algo_name in ["PPO", "A2C", "TD3", "SAC"]:
+    if (fixed_lr, fixed_gamma) in results[algo_name]:
+        z_dict[algo_name] = results[algo_name][(fixed_lr, fixed_gamma)]["z"]
+        theta_dict[algo_name] = results[algo_name][(fixed_lr, fixed_gamma)]["theta"]
+        sigma_dict[algo_name] = results[algo_name][(fixed_lr, fixed_gamma)]["sigma"]
+        force_dict[algo_name] = results[algo_name][(fixed_lr, fixed_gamma)]["force"]
+        moment_dict[algo_name] = results[algo_name][(fixed_lr, fixed_gamma)]["moment"]
+    else:
+        print(f"Warning: No data found for {algo_name} at lr={fixed_lr} and gamma={fixed_gamma}")
+
+# Plot z vs time
 plt.figure()
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        total_rewards = results[algo_name][(lr, gm)]["total_rewards"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(total_rewards)), total_rewards,
-                 linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
-plt.xlabel('Episode')
-plt.ylabel('Total Reward')
-plt.title('Total Reward per Episode - Comparison')
-plt.legend()
-plt.savefig('comparison_total_reward_per_episode.png')
-
-
-# Plot state error over time
-plt.figure()
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        state_errors = results[algo_name][(lr, gm)]["state_errors"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(state_errors)), state_errors,
-                 linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
-plt.xlabel('Time Step')
-plt.ylabel('State Error')
-plt.title('State Error Over Time - Comparison')
-plt.legend()
-plt.savefig('comparison_state_error_over_time.png')
-
-
-# Plot actions (force, moment) and rewards over time
-plt.figure(figsize=(10, 10))
-
-plt.subplot(3, 1, 1)
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        force = results[algo_name][(lr, gm)]["force"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(force)), force, linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
-plt.xlabel('Timestep')
-plt.ylabel('Force')
-plt.title('Force Over Time')
-plt.legend()
-
-plt.subplot(3, 1, 2)
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        moment = results[algo_name][(lr, gm)]["moment"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(moment)), moment, linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
-plt.xlabel('Timestep')
-plt.ylabel('Moment')
-plt.title('Moment Over Time')
-plt.legend()
-
-plt.subplot(3, 1, 3)
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        rew = results[algo_name][(lr, gm)]["rewards"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(rew)), rew, linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
-plt.xlabel('Timestep')
-plt.ylabel('Reward')
-plt.title('Reward Over Time')
-plt.legend()
-
-plt.tight_layout()
-plt.savefig('comparison_actions_rewards_over_time.png')
-
-
-# Plot states (z, theta, sigma) over time
-plt.figure(figsize=(10, 10))
-
-plt.subplot(3, 1, 1)
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        z = results[algo_name][(lr, gm)]["z"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(z)), z, linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
+for algo_name in z_dict:
+    plt.plot(range(len(z_dict[algo_name])), z_dict[algo_name], color=algo_colors[algo_name], label=algo_name)
 plt.xlabel('Timestep')
 plt.ylabel('z')
-plt.title('Vertical Position Over Time')
+plt.title(f'z vs Time (lr={fixed_lr}, gamma={fixed_gamma})')
 plt.legend()
+plt.savefig('comparison_z_vs_time_lr1e-4_gamma0.99.png')
+plt.close()
 
-plt.subplot(3, 1, 2)
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        theta = results[algo_name][(lr, gm)]["theta"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(theta)), np.array(theta)*180.0/math.pi, linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
+# Plot theta vs time (convert to degrees)
+plt.figure()
+for algo_name in theta_dict:
+    theta_deg = np.array(theta_dict[algo_name]) * 180.0 / math.pi
+    plt.plot(range(len(theta_deg)), theta_deg, color=algo_colors[algo_name], label=algo_name)
 plt.xlabel('Timestep')
 plt.ylabel('Theta (deg)')
-plt.title('Theta Over Time')
+plt.title(f'Theta vs Time (lr={fixed_lr}, gamma={fixed_gamma})')
 plt.legend()
+plt.savefig('comparison_theta_vs_time_lr1e-4_gamma0.99.png')
+plt.close()
 
-plt.subplot(3, 1, 3)
-for algo_name in results:
-    for (lr, gm) in results[algo_name]:
-        sigma = results[algo_name][(lr, gm)]["sigma"]
-        style, marker = style_map[(lr, gm)]
-        plt.plot(range(len(sigma)), np.array(sigma)*180.0/math.pi, linestyle=style, marker=marker, color=algo_colors[algo_name],
-                 label=f"{algo_name}, lr={lr}, gamma={gm}")
+# Plot sigma vs time (convert to degrees)
+plt.figure()
+for algo_name in sigma_dict:
+    sigma_deg = np.array(sigma_dict[algo_name]) * 180.0 / math.pi
+    plt.plot(range(len(sigma_deg)), sigma_deg, color=algo_colors[algo_name], label=algo_name)
 plt.xlabel('Timestep')
 plt.ylabel('Sigma (deg)')
-plt.title('Sigma Over Time')
+plt.title(f'Sigma vs Time (lr={fixed_lr}, gamma={fixed_gamma})')
 plt.legend()
+plt.savefig('comparison_sigma_vs_time_lr1e-4_gamma0.99.png')
+plt.close()
 
-plt.tight_layout()
-plt.savefig('comparison_states_over_time.png')
+# Plot force vs time
+plt.figure()
+for algo_name in force_dict:
+    plt.plot(range(len(force_dict[algo_name])), force_dict[algo_name], color=algo_colors[algo_name], label=algo_name)
+plt.xlabel('Timestep')
+plt.ylabel('Force')
+plt.title(f'Force vs Time (lr={fixed_lr}, gamma={fixed_gamma})')
+plt.legend()
+plt.savefig('comparison_force_vs_time_lr1e-4_gamma0.99.png')
+plt.close()
+
+# Plot moment vs time
+plt.figure()
+for algo_name in moment_dict:
+    plt.plot(range(len(moment_dict[algo_name])), moment_dict[algo_name], color=algo_colors[algo_name], label=algo_name)
+plt.xlabel('Timestep')
+plt.ylabel('Moment')
+plt.title(f'Moment vs Time (lr={fixed_lr}, gamma={fixed_gamma})')
+plt.legend()
+plt.savefig('comparison_moment_vs_time_lr1e-4_gamma0.99.png')
+plt.close()
+
+#------------------------------------------------
+# 2) Hyperparameter Variation Plots for PPO
+#------------------------------------------------
+
+# Define PPO-specific color maps for varying learning rates and gammas
+ppo_color_map_lr = {
+    1e-4: "blue",
+    5e-4: "red"
+}
+
+ppo_color_map_gamma = {
+    0.99: "blue",
+    0.995: "green",
+    0.95: "red"
+}
+
+# Define hyperparameter combinations to compare
+compare_lrs = [1e-4, 5e-4]
+fixed_gamma_for_lr = 0.99
+
+compare_gammas = [0.99, 0.995, 0.95]
+fixed_lr_for_gamma = 1e-4
+
+# Check that PPO results are available for these combinations
+for lr_val in compare_lrs:
+    if (lr_val, fixed_gamma_for_lr) not in results["PPO"]:
+        print(f"Warning: No PPO data for lr={lr_val}, gamma={fixed_gamma_for_lr}")
+for gm_val in compare_gammas:
+    if (fixed_lr_for_gamma, gm_val) not in results["PPO"]:
+        print(f"Warning: No PPO data for lr={fixed_lr_for_gamma}, gamma={gm_val}")
+
+# Function to plot PPO data with given parameter variations
+def plot_ppo_comparison(metric, ylabel, title_suffix, filename_suffix, conversion=lambda x: x):
+    plt.figure()
+    # Learning rate comparison at fixed gamma
+    for lr_val in compare_lrs:
+        if (lr_val, fixed_gamma_for_lr) in results["PPO"]:
+            data = results["PPO"][(lr_val, fixed_gamma_for_lr)][metric]
+            data_converted = conversion(data)
+            plt.plot(range(len(data_converted)), data_converted, color=ppo_color_map_lr[lr_val],
+                     label=f"lr={lr_val}, gamma={fixed_gamma_for_lr}")
+    # Gamma comparison at fixed learning rate
+    for gm_val in compare_gammas:
+        if (fixed_lr_for_gamma, gm_val) in results["PPO"]:
+            data = results["PPO"][(fixed_lr_for_gamma, gm_val)][metric]
+            data_converted = conversion(data)
+            plt.plot(range(len(data_converted)), data_converted, color=ppo_color_map_gamma[gm_val],
+                     label=f"lr={fixed_lr_for_gamma}, gamma={gm_val}")
+    plt.xlabel('Timestep')
+    plt.ylabel(ylabel)
+    plt.title(f'PPO: Effect of Hyperparameters on {title_suffix}')
+    plt.legend()
+    plt.savefig(f'ppo_{filename_suffix}.png')
+    plt.close()
+
+# Plot z vs time
+plot_ppo_comparison(
+    metric="z",
+    ylabel="z",
+    title_suffix="z",
+    filename_suffix="z_vs_time_hyperparams",
+    conversion=lambda x: x
+)
+
+# Plot theta vs time (convert to degrees)
+plot_ppo_comparison(
+    metric="theta",
+    ylabel="Theta (deg)",
+    title_suffix="Theta",
+    filename_suffix="theta_vs_time_hyperparams",
+    conversion=lambda x: np.array(x) * 180.0 / math.pi
+)
+
+# Plot sigma vs time (convert to degrees)
+plot_ppo_comparison(
+    metric="sigma",
+    ylabel="Sigma (deg)",
+    title_suffix="Sigma",
+    filename_suffix="sigma_vs_time_hyperparams",
+    conversion=lambda x: np.array(x) * 180.0 / math.pi
+)
+
+# Plot force vs time
+plot_ppo_comparison(
+    metric="force",
+    ylabel="Force",
+    title_suffix="Force",
+    filename_suffix="force_vs_time_hyperparams",
+    conversion=lambda x: x
+)
+
+# Plot moment vs time
+plot_ppo_comparison(
+    metric="moment",
+    ylabel="Moment",
+    title_suffix="Moment",
+    filename_suffix="moment_vs_time_hyperparams",
+    conversion=lambda x: x
+)
 
 print("Training and comparison plots completed successfully.")
